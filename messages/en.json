@@ -1,0 +1,73 @@
+{
+  "app": {
+    "name": "Legal Baba",
+    "tagline": "AI-drafted legal documents for Nepal, in minutes."
+  },
+  "nav": {
+    "documents": "Documents",
+    "pricing": "Pricing",
+    "dashboard": "Dashboard",
+    "login": "Log in",
+    "signup": "Get started",
+    "admin": "Admin"
+  },
+  "landing": {
+    "hero": {
+      "title": "Draft legally-structured documents in minutes, not days",
+      "subtitle": "Answer a guided questionnaire in Nepali or English. Legal Baba's AI drafting engine fills clauses, formats your document, and flags what's missing — reviewed against lawyer-built templates.",
+      "cta_primary": "Start a document",
+      "cta_secondary": "Browse document categories"
+    },
+    "categories": {
+      "title": "Document categories",
+      "employment": "Employment",
+      "rental": "Rental & Property",
+      "business": "Business & Commercial",
+      "personal": "Personal & Family",
+      "consumer": "Consumer & General",
+      "startup": "Startup / Digital"
+    },
+    "trust": {
+      "title": "Why AI-drafted documents still need a lawyer's review",
+      "body": "Legal Baba accelerates drafting using vetted clause templates and AI assistance, but it does not replace a licensed Nepali advocate. Every document is a draft — have it reviewed before you sign or notarize."
+    },
+    "faq": { "title": "Frequently asked questions" },
+    "pricing": { "title": "Simple, Nepal-friendly pricing" }
+  },
+  "wizard": {
+    "step": "Step {current} of {total}",
+    "save_draft": "Save as draft",
+    "next": "Next",
+    "back": "Back",
+    "generate": "Generate document",
+    "language": {
+      "label": "Document language",
+      "en": "English",
+      "np": "Nepali",
+      "bilingual": "Bilingual (side-by-side)"
+    },
+    "date": { "bs": "B.S.", "ad": "A.D." }
+  },
+  "review": {
+    "title": "Review your draft",
+    "explain_clause": "Explain this clause",
+    "risk_flag": "Needs attention",
+    "regenerate": "Regenerate",
+    "download_pdf": "Download PDF",
+    "download_docx": "Download DOCX",
+    "disclaimer": "AI-generated draft — not a substitute for legal advice. Have this reviewed by a licensed advocate before signing or notarizing."
+  },
+  "dashboard": {
+    "title": "Your documents",
+    "drafts": "Drafts",
+    "finalized": "Finalized",
+    "shared": "Shared links"
+  },
+  "common": {
+    "loading": "Loading…",
+    "error": "Something went wrong.",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete"
+  }
+}

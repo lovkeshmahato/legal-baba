@@ -1,0 +1,494 @@
+// Legal Baba — AI Legal Document Generator (Nepal)
+// Prisma schema — PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  USER
+  BUSINESS_ADMIN
+  SUPER_ADMIN
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum PlanTier {
+  FREE
+  INDIVIDUAL
+  BUSINESS
+  ENTERPRISE
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+  PAY_PER_DOCUMENT
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+enum PaymentGateway {
+  ESEWA
+  KHALTI
+  FONEPAY
+  CONNECTIPS
+  IME_PAY
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum PaymentPurpose {
+  SUBSCRIPTION
+  SINGLE_DOCUMENT
+}
+
+enum DocumentLanguage {
+  EN
+  NP
+  BILINGUAL
+}
+
+enum DocumentStatus {
+  DRAFT
+  GENERATED
+  FINALIZED
+  ARCHIVED
+}
+
+enum FieldType {
+  TEXT
+  TEXTAREA
+  NUMBER
+  CURRENCY
+  DATE_AD
+  DATE_BS
+  SELECT
+  MULTI_SELECT
+  CHECKBOX
+  PARTY_BLOCK
+  CLAUSE_TOGGLE
+  FREE_TEXT_CLAUSE
+}
+
+enum SignatureType {
+  TYPED
+  DRAWN
+}
+
+enum ModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DiscountType {
+  PERCENT
+  FIXED
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Auth (NextAuth.js / Auth.js — Prisma adapter)
+// ─────────────────────────────────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Users & Organizations
+// ─────────────────────────────────────────────────────────────────────────
+
+model User {
+  id                String    @id @default(cuid())
+  name              String?
+  email             String    @unique
+  emailVerified     DateTime?
+  image             String?
+  passwordHash      String? // null for OAuth-only accounts
+  role              UserRole  @default(USER)
+  preferredLanguage String    @default("en") // "en" | "np"
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  accounts       Account[]
+  sessions       Session[]
+  orgMemberships OrgMember[]
+
+  generatedDocuments GeneratedDocument[]
+  subscriptions      Subscription[]
+  payments           Payment[]
+  auditLogs          AuditLog[]
+  moderationItems    ModerationQueueItem[] @relation("SubmittedBy")
+  moderationReviews  ModerationQueueItem[] @relation("ReviewedBy")
+
+  @@index([email])
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members            OrgMember[]
+  subscriptions      Subscription[]
+  generatedDocuments GeneratedDocument[]
+  auditLogs          AuditLog[]
+}
+
+model OrgMember {
+  id       String   @id @default(cuid())
+  orgId    String
+  userId   String
+  role     OrgRole  @default(MEMBER)
+  joinedAt DateTime @default(now())
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Plans, Subscriptions & Payments
+// ─────────────────────────────────────────────────────────────────────────
+
+model Plan {
+  id                    String   @id @default(cuid())
+  tier                  PlanTier @unique
+  nameEn                String
+  nameNp                String
+  descriptionEn         String?  @db.Text
+  descriptionNp         String?  @db.Text
+  priceNprMonthly       Int      @default(0) // paisa-free NPR integer
+  priceNprYearly        Int      @default(0)
+  documentLimitPerMonth Int? // null = unlimited
+  watermarkFree         Boolean  @default(false)
+  docxExport            Boolean  @default(false)
+  eSignEnabled          Boolean  @default(false)
+  teamSeats             Int? // null = single user
+  apiAccess             Boolean  @default(false)
+  active                Boolean  @default(true)
+  sortOrder             Int      @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  userId             String?
+  orgId              String?
+  planId             String
+  status             SubscriptionStatus @default(ACTIVE)
+  billingInterval    BillingInterval    @default(MONTHLY)
+  gateway            PaymentGateway?
+  currentPeriodStart DateTime           @default(now())
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  plan         Plan          @relation(fields: [planId], references: [id])
+  payments     Payment[]
+
+  @@index([userId])
+  @@index([orgId])
+}
+
+model Payment {
+  id                   String         @id @default(cuid())
+  userId               String
+  subscriptionId       String?
+  generatedDocumentId  String? // set when purpose = SINGLE_DOCUMENT
+  purpose              PaymentPurpose @default(SUBSCRIPTION)
+  amountNpr            Int
+  gateway              PaymentGateway
+  status               PaymentStatus  @default(PENDING)
+  gatewayTransactionId String?
+  gatewayRefId         String?
+  webhookPayload       Json?
+  couponId             String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  user              User               @relation(fields: [userId], references: [id])
+  subscription      Subscription?      @relation(fields: [subscriptionId], references: [id])
+  generatedDocument GeneratedDocument? @relation(fields: [generatedDocumentId], references: [id])
+  coupon            CouponCode?        @relation(fields: [couponId], references: [id])
+
+  @@index([userId])
+  @@index([gatewayTransactionId])
+}
+
+model CouponCode {
+  id              String       @id @default(cuid())
+  code            String       @unique
+  discountType    DiscountType
+  discountValue   Int // percent (0-100) or fixed NPR amount
+  applicablePlans PlanTier[]
+  validFrom       DateTime     @default(now())
+  validTo         DateTime?
+  usageLimit      Int?
+  usedCount       Int          @default(0)
+  active          Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+
+  payments Payment[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Template Engine — Categories, Templates & Clause Library
+// ─────────────────────────────────────────────────────────────────────────
+
+model DocumentCategory {
+  id            String   @id @default(cuid())
+  slug          String   @unique
+  nameEn        String
+  nameNp        String
+  descriptionEn String?  @db.Text
+  descriptionNp String?  @db.Text
+  icon          String?
+  sortOrder     Int      @default(0)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  templates DocumentTemplate[]
+}
+
+model DocumentTemplate {
+  id         String @id @default(cuid())
+  slug       String @unique
+  categoryId String
+
+  titleEn       String
+  titleNp       String
+  descriptionEn String? @db.Text
+  descriptionNp String? @db.Text
+
+  // JSON-schema-defined questionnaire fields. See src/types/template-engine.ts
+  // for the TemplateFieldSchema[] shape validated against this column.
+  fieldSchema Json
+
+  // Per-template system prompts (editable from the admin panel, not hardcoded).
+  systemPromptEn String @db.Text
+  systemPromptNp String @db.Text
+
+  supportedLanguages   DocumentLanguage[] @default([EN, NP, BILINGUAL])
+  requiresLawyerReview Boolean            @default(true)
+  isGovernmentFormat   Boolean            @default(false) // true => "draft only, not ready to file"
+
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category           DocumentCategory    @relation(fields: [categoryId], references: [id])
+  clauses            ClauseLibraryItem[]
+  generatedDocuments GeneratedDocument[]
+
+  @@index([categoryId])
+}
+
+model ClauseLibraryItem {
+  id         String @id @default(cuid())
+  templateId String
+  key        String // stable identifier referenced by conditionalOn rules, e.g. "security_deposit"
+
+  titleEn String
+  titleNp String
+  bodyEn  String @db.Text
+  bodyNp  String @db.Text
+
+  isDefault    Boolean @default(true) // included unless explicitly toggled off
+  isToggleable Boolean @default(false) // shown as an on/off clause-toggle field to the user
+  sortOrder    Int     @default(0)
+
+  // e.g. { "field": "includeSecurityDeposit", "equals": true }
+  conditionalOn Json?
+
+  // Shown in the AI review step when this clause is absent, e.g.
+  // "No dispute resolution clause selected."
+  riskFlagIfMissing String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  template DocumentTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, key])
+  @@index([templateId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Generated Documents
+// ─────────────────────────────────────────────────────────────────────────
+
+model GeneratedDocument {
+  id         String  @id @default(cuid())
+  userId     String
+  orgId      String?
+  templateId String
+
+  title    String?
+  language DocumentLanguage
+  status   DocumentStatus   @default(DRAFT)
+
+  version           Int     @default(1)
+  previousVersionId String? // self-relation for regenerate-with-edits history
+
+  // Answers captured from the questionnaire wizard (shape defined by the
+  // template's fieldSchema).
+  formData Json
+
+  // Generated/edited document body — Tiptap JSON document.
+  content Json
+
+  // Clarifying questions / risk flags returned by the AI generation step,
+  // e.g. [{ "type": "missing_field", "message": "..." }].
+  aiFlags Json?
+
+  pdfUrl      String?
+  docxUrl     String?
+  watermarked Boolean @default(true)
+
+  shareToken String? @unique // set when the user creates a view-only share link
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization    Organization?       @relation(fields: [orgId], references: [id])
+  template        DocumentTemplate    @relation(fields: [templateId], references: [id])
+  previousVersion GeneratedDocument?  @relation("DocumentVersions", fields: [previousVersionId], references: [id])
+  nextVersions    GeneratedDocument[] @relation("DocumentVersions")
+
+  signatures      Signature[]
+  payments        Payment[]
+  moderationItems ModerationQueueItem[]
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([templateId])
+}
+
+model Signature {
+  id                  String        @id @default(cuid())
+  generatedDocumentId String
+  type                SignatureType
+  signerName          String
+  dataUrl             String        @db.Text // typed text or drawn-signature image data URI
+  ipAddress           String?
+  userAgent           String?
+  signedAt            DateTime      @default(now())
+
+  document GeneratedDocument @relation(fields: [generatedDocumentId], references: [id], onDelete: Cascade)
+
+  @@index([generatedDocumentId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Trust, Safety & Audit
+// ─────────────────────────────────────────────────────────────────────────
+
+model ModerationQueueItem {
+  id                  String           @id @default(cuid())
+  userId              String
+  generatedDocumentId String?
+  inputText           String           @db.Text // the free-text custom-clause request
+  flaggedReason       String?
+  status              ModerationStatus @default(PENDING)
+  reviewedById        String?
+  reviewedAt          DateTime?
+  createdAt           DateTime         @default(now())
+
+  user              User               @relation("SubmittedBy", fields: [userId], references: [id])
+  reviewedBy        User?              @relation("ReviewedBy", fields: [reviewedById], references: [id])
+  generatedDocument GeneratedDocument? @relation(fields: [generatedDocumentId], references: [id])
+
+  @@index([status])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  orgId      String?
+  action     String // e.g. "document.generated", "document.downloaded", "template.updated"
+  entityType String // e.g. "GeneratedDocument", "DocumentTemplate"
+  entityId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  user         User?         @relation(fields: [userId], references: [id])
+  organization Organization? @relation(fields: [orgId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+}
