@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentSession } from "@/lib/session";
 import { anthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { rateLimit } from "@/lib/rate-limit";
 
 const explainSchema = z.object({
   text: z.string().min(1).max(4000),
@@ -15,6 +16,11 @@ export async function POST(
   const session = await getCurrentSession();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const limit = rateLimit("documents.explain", session.user.id, 40, 10 * 60 * 1000);
+  if (!limit.ok) {
+    return NextResponse.json({ error: "Too many requests. Please slow down." }, { status: 429 });
   }
 
   const { id } = await params;

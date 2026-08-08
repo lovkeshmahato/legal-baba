@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentSession } from "@/lib/session";
 import { parseTemplateFieldSchema, validateFormData } from "@/lib/template-engine";
 import { toInputJson } from "@/lib/prisma-json";
+import { rateLimit } from "@/lib/rate-limit";
 
 const createDocumentSchema = z.object({
   templateSlug: z.string().min(1),
@@ -15,6 +16,11 @@ export async function POST(request: Request) {
   const session = await getCurrentSession();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const limit = rateLimit("documents.create", session.user.id, 30, 10 * 60 * 1000);
+  if (!limit.ok) {
+    return NextResponse.json({ error: "Too many requests. Please slow down." }, { status: 429 });
   }
 
   const body = await request.json().catch(() => null);

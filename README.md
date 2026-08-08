@@ -215,6 +215,117 @@ Seeded: all 6 categories from the spec, plus fully-fielded templates for
   rather than guessing.
 - Every document route checks `document.userId === session.user.id` before
   reading or mutating — no cross-account access.
+- Security response headers are set globally in `next.config.mjs`:
+  Content-Security-Policy, X-Content-Type-Options, X-Frame-Options,
+  Referrer-Policy, Permissions-Policy, and Strict-Transport-Security.
+  `poweredByHeader: false` also drops the `X-Powered-By: Next.js` header.
+  The CSP is intentionally pragmatic (`'unsafe-inline'` for script/style,
+  since Next's hydration bootstrap and some component libraries need it)
+  rather than a stricter nonce-based policy — see "Residual risk" below.
+- `src/lib/rate-limit.ts` — a per-process, in-memory sliding-window limiter
+  — is applied to `/api/register` (5/15min per IP) and the Claude-calling
+  routes, `/api/documents` create, `/api/documents/[id]/generate`, and
+  `/api/documents/[id]/explain` (per user). It caps abuse and runaway
+  Anthropic API cost on a single instance; a multi-instance/serverless
+  deploy would need shared storage (Redis) for a hard guarantee — noted in
+  the file.
+- `src/lib/moderation.ts` implements the free-text-clause safety filter the
+  original spec called for but that was never actually wired up: a fast
+  regex pre-filter for obvious prompt-injection attempts, then a
+  Claude-based classifier (forced tool-use) that flags requests unrelated
+  to drafting a clause, illegal content, or attempts to extract/override
+  the system prompt. Rejections are recorded in `ModerationQueueItem`
+  (`status: REJECTED`) instead of silently dropped, and the generate route
+  returns a 422 rather than calling Claude with the flagged text at all.
+- `GoogleProvider` is only registered in `authOptions` when both
+  `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set, instead of always
+  registering it with empty-string credentials (which would render a
+  "Continue with Google" button that fails confusingly instead of not
+  appearing).
+- Emails are trimmed/lowercased consistently at both registration and
+  login, so `User+Foo@x.com` and `user+foo@x.com` can't become two
+  separate accounts.
+- `GET /api/health` (public, unauthenticated) reports presence-only env
+  checks and a live database round-trip — see "Diagnosing a broken
+  deploy" below.
+
+### Residual risk (`npm audit`)
+
+`npm audit` currently reports vulnerabilities in `next-auth`'s bundled
+`@auth/core@0.34.x` (critical — malformed-Bearer-header exception, OAuth
+state/nonce/PKCE cookie binding, email homoglyph bypass) and in the
+`next`/`postcss` dependency chain. Investigated during this pass, not
+patched — here's why and what mitigates it:
+
+- **`next-auth` v4 is inherent, not a simple bump.** `npm audit fix --force`
+  resolves it by downgrading to `next-auth@4.24.7`, which then reintroduces
+  a *different* `cookie`/`uuid` vulnerability the audit tool immediately
+  flags as needing `4.24.15` again — a circular fix. It also breaks
+  `@auth/prisma-adapter`'s TypeScript types outright (verified: `tsc`
+  fails). The only real fix is migrating to next-auth v5 (Auth.js), a
+  meaningfully different API (session handling, config shape) that
+  deserves its own tested migration, not a blind dependency bump layered
+  on top of an already-broken deploy.
+  - Practical exposure is lower than "critical" suggests for this app
+    specifically: we never call `getToken()` (the vulnerable Bearer-header
+    path), and we register exactly one OAuth provider (Google), so the
+    "cookies not bound to the provider that created them" issue has no
+    second provider to confuse it with.
+- **`next`'s advisory range is extremely broad** (it spans years of
+  releases across several distinct CVEs merged into one min/max). The
+  fixed versions are Next 15/16, both major upgrades from our Next 14.
+  Checked which specific advisories actually apply to this codebase: we
+  don't use Server Actions, `next/image`, or custom `rewrites()` — the
+  attack surface for several of the listed CVEs (Server Action DoS/SSRF,
+  Image Optimizer DoS) doesn't exist here. The Middleware-related items
+  (cache poisoning, i18n bypass) are the most relevant, since `middleware.ts`
+  handles locale routing. A Next 15 upgrade is plausible with low risk later
+  (our code already treats `params`/`searchParams` as `Promise`s, which is
+  the main breaking change from 14→15), but wasn't attempted here — see
+  "Next steps".
+
+## Diagnosing a broken deploy
+
+If the app 500s on pages/actions that touch the database or auth (register,
+login, "Browse documents", generating a document) while the landing page
+loads fine, it's almost always missing/misconfigured environment
+variables or an unreachable database — **not** a code bug. Next.js
+deliberately hides the real error from the browser in production (you'll
+see a generic "Application error… Digest: …"); the actual cause is in your
+hosting platform's server/application logs, and is also surfaced at:
+
+```
+GET https://<your-domain>/api/health
+```
+
+This returns presence-only checks for `DATABASE_URL`, `NEXTAUTH_SECRET`,
+`NEXTAUTH_URL`, `ANTHROPIC_API_KEY` (never their values) plus a live
+`SELECT 1` against the database. A `503` with `database.error` set means
+the app can't reach Postgres; `env.missingRequired` lists any unset
+required variable.
+
+**The most common cause on budget/shared hosting: this app requires
+PostgreSQL, and many shared-hosting plans (including Hostinger's shared
+plans) only provision MySQL/MariaDB, not Postgres.** If there's no
+Postgres instance reachable from `DATABASE_URL`, every database-touching
+request fails uniformly — which matches "homepage loads, every button
+errors" exactly. Options: point `DATABASE_URL`/`DIRECT_URL` at an external
+managed Postgres (Neon or Supabase both have generous free tiers and work
+fine from any host), or move to a host with Postgres built in (Hostinger
+VPS with a self-hosted Postgres container, Railway, Render, Vercel +
+Neon/Supabase).
+
+Checklist for a fresh deploy:
+
+1. All of `.env.example`'s required vars are set on the host (not just
+   present locally) — `DATABASE_URL`, `NEXTAUTH_URL` (must exactly match
+   the deployed domain, including `https://`), `NEXTAUTH_SECRET`
+   (`openssl rand -base64 32`), `ANTHROPIC_API_KEY`.
+2. Migrations have been applied to the *production* database:
+   `npx prisma migrate deploy`.
+3. The template/category/plan seed has been run against production:
+   `npm run db:seed` (safe to re-run — it upserts).
+4. `GET /api/health` returns `{"ok": true}`.
 
 ## Verified working end-to-end
 

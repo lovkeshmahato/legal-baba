@@ -5,6 +5,8 @@ import { getCurrentSession } from "@/lib/session";
 import { generateDocument } from "@/lib/ai/generate-document";
 import { validateFormData, parseTemplateFieldSchema } from "@/lib/template-engine";
 import { toInputJson } from "@/lib/prisma-json";
+import { rateLimit } from "@/lib/rate-limit";
+import { checkFreeTextClause } from "@/lib/moderation";
 
 const regenerateSchema = z.object({
   formData: z.record(z.string(), z.unknown()).optional(),
@@ -17,6 +19,11 @@ export async function POST(
   const session = await getCurrentSession();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const limit = rateLimit("documents.generate", session.user.id, 20, 10 * 60 * 1000);
+  if (!limit.ok) {
+    return NextResponse.json({ error: "Too many requests. Please slow down." }, { status: 429 });
   }
 
   const { id } = await params;
@@ -40,6 +47,29 @@ export async function POST(
   const fieldErrors = validateFormData(fields, formData);
   if (fieldErrors.length > 0) {
     return NextResponse.json({ error: "Validation failed.", fieldErrors }, { status: 400 });
+  }
+
+  const customClause = typeof formData.customClause === "string" ? formData.customClause : "";
+  if (customClause.trim()) {
+    const moderation = await checkFreeTextClause(customClause);
+    if (!moderation.allowed) {
+      await prisma.moderationQueueItem.create({
+        data: {
+          userId: session.user.id,
+          generatedDocumentId: existing.id,
+          inputText: customClause,
+          flaggedReason: moderation.reason,
+          status: "REJECTED",
+        },
+      });
+      return NextResponse.json(
+        {
+          error:
+            "Your custom clause request couldn't be processed — it doesn't read as a legal document clause. Please rephrase it.",
+        },
+        { status: 422 }
+      );
+    }
   }
 
   let content: Record<string, unknown>;
