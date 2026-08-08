@@ -50,6 +50,7 @@
   },
   "review": {
     "title": "Review your draft",
+    "save": "Save changes",
     "explain_clause": "Explain this clause",
     "risk_flag": "Needs attention",
     "regenerate": "Regenerate",

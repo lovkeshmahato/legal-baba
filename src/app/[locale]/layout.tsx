@@ -3,6 +3,8 @@ import { NextIntlClientProvider } from "next-intl";
 import { getMessages, getTranslations } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { routing, type AppLocale } from "@/i18n/routing";
+import { SessionProvider } from "@/components/providers/session-provider";
+import { SiteHeader } from "@/components/site-header";
 import "../globals.css";
 
 function isAppLocale(value: string): value is AppLocale {
@@ -44,7 +46,10 @@ export default async function LocaleLayout({
     <html lang={locale} dir="ltr" suppressHydrationWarning>
       <body className={locale === "np" ? "font-nepali" : "font-sans"}>
         <NextIntlClientProvider messages={messages}>
-          {children}
+          <SessionProvider>
+            <SiteHeader />
+            {children}
+          </SessionProvider>
         </NextIntlClientProvider>
       </body>
     </html>
