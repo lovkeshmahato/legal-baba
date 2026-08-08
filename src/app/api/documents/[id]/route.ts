@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentSession } from "@/lib/session";
+import { toInputJson } from "@/lib/prisma-json";
 
 const updateDocumentSchema = z.object({
-  content: z.unknown(),
+  content: z.unknown().optional(),
+  tags: z.array(z.string().min(1).max(40)).max(20).optional(),
+  archived: z.boolean().optional(),
 });
 
 export async function PATCH(
@@ -28,10 +32,16 @@ export async function PATCH(
     return NextResponse.json({ error: "Document not found." }, { status: 404 });
   }
 
-  await prisma.generatedDocument.update({
-    where: { id },
-    data: { content: parsed.data.content as never },
-  });
+  const data: Prisma.GeneratedDocumentUpdateInput = {};
+  if (parsed.data.content !== undefined) data.content = toInputJson(parsed.data.content);
+  if (parsed.data.tags !== undefined) data.tags = { set: parsed.data.tags };
+  if (parsed.data.archived) data.status = "ARCHIVED";
+
+  if (Object.keys(data).length === 0) {
+    return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
+  }
+
+  await prisma.generatedDocument.update({ where: { id }, data });
 
   return NextResponse.json({ ok: true });
 }

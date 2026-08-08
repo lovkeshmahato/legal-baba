@@ -32,6 +32,15 @@ export async function GET(
   const blocks = tiptapToBlocks(document.content);
   const title = pickLocalized(document.template.titleEn, document.template.titleNp, locale);
 
+  await prisma.auditLog.create({
+    data: {
+      userId: session.user.id,
+      action: "document.downloaded_docx",
+      entityType: "GeneratedDocument",
+      entityId: document.id,
+    },
+  });
+
   const buffer = await buildDocx({
     title,
     blocks,

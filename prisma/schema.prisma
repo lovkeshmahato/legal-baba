@@ -419,6 +419,8 @@ model GeneratedDocument {
   docxUrl     String?
   watermarked Boolean @default(true)
 
+  tags String[] @default([]) // free-form user tags, for dashboard filtering (no folders model yet)
+
   shareToken String? @unique // set when the user creates a view-only share link
 
   createdAt DateTime @default(now())

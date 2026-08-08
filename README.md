@@ -5,9 +5,10 @@ businesses generate legally-structured documents through a guided
 questionnaire, backed by lawyer-reviewed clause templates and Claude-drafted
 language.
 
-**Built so far (Phase 1–5):** project scaffold, database schema, the
+**Built so far (Phase 1–6):** project scaffold, database schema, the
 template engine, auth, the questionnaire wizard, Claude-backed
-generation/review, and PDF/DOCX export. Not yet built: dashboard, payments,
+generation/review, PDF/DOCX export, and the dashboard (drafts, documents,
+tags, view-only share links, recent activity). Not yet built: payments,
 admin panel, e-sign — see "Next steps" below.
 
 ## Stack
@@ -60,27 +61,33 @@ src/
         page.tsx              # category/template picker grid
         [slug]/page.tsx        # questionnaire wizard (session-gated)
         review/[id]/page.tsx    # AI review/edit screen
+      dashboard/page.tsx      # drafts, documents, tag filter, recent activity
+      share/[token]/page.tsx   # public, unauthenticated view-only document
       login/page.tsx, register/page.tsx
     api/
       auth/[...nextauth]/route.ts
       register/route.ts        # credentials sign-up
       documents/
         route.ts                # POST: validate + create a DRAFT
-        [id]/route.ts             # PATCH: save edited Tiptap content
+        [id]/route.ts             # PATCH: save content, tags, or archive
         [id]/generate/route.ts     # POST: Claude draft (+ regenerate-as-new-version)
         [id]/explain/route.ts       # POST: "explain this clause" in plain language
         [id]/pdf/route.ts            # GET: render + stream a PDF
         [id]/docx/route.ts            # GET: render + stream a DOCX
+        [id]/share/route.ts           # POST: create/return share token, DELETE: revoke
   components/
     ui/                       # Button, Input, Select, Card, Badge, …
     wizard/                   # WizardForm, DynamicField, PartyBlockInput, DateBsInput,
                                # Zustand store context (wizard-context.tsx)
     review/document-editor-client.tsx   # Tiptap editor + risk flags + disclaimer
+    dashboard/document-card.tsx           # share/archive/tag actions per document
+    share/read-only-document.tsx           # renders DocBlock[] as static HTML
     providers/session-provider.tsx, site-header.tsx, locale-switcher.tsx
   i18n/
     routing.ts, navigation.ts, request.ts
   lib/
-    prisma.ts, session.ts, auth.ts, anthropic.ts, utils.ts, i18n-content.ts, prisma-json.ts
+    prisma.ts, session.ts, auth.ts, anthropic.ts, utils.ts, i18n-content.ts, prisma-json.ts,
+    share-token.ts             # random URL-safe token for view-only share links
     template-engine/          # conditions.ts, validate.ts, clauses.ts
     ai/
       build-prompt.ts          # assembles the per-generation user prompt
@@ -162,6 +169,15 @@ rows via the seed script or (later) the admin CRUD UI — no code changes.
    `<Text>` runs (see `Bilingual` in `pdf-document.tsx`) rather than mixed
    in one run, since a single font can't cover both scripts and react-pdf
    errors instead of falling back.
+7. The **dashboard** (`/dashboard`) lists the signed-in user's documents —
+   `DRAFT`s separately from `GENERATED`/`FINALIZED` ones, excluding
+   `ARCHIVED` — with a tag filter (`?tag=`) and a "Recent activity" panel
+   built from `AuditLog` (drafts created, generations, downloads). Each
+   `DocumentCard` can add/remove free-form tags, archive (soft delete —
+   sets `status: ARCHIVED`, never hard-deletes), or create/revoke a
+   `shareToken`. A share link renders at `/share/[token]` — a public,
+   unauthenticated, read-only page (looked up by `shareToken`, no session
+   check) rendering the same `DocBlock[]` the PDF/DOCX exporters use.
 
 ## Data model highlights (`prisma/schema.prisma`)
 
@@ -210,19 +226,31 @@ fails cleanly with a 502 + JSON error on an invalid key, as expected in this
 sandbox) → PATCH saved edits → review page renders → downloaded PDF and
 DOCX for a bilingual document (mixed English/Nepali paragraphs, bold/italic
 marks, a bullet list) with the Devanagari text rendering correctly in both
-formats. The document picker, wizard, login, and register pages all render
-correctly in both locales.
+formats → shared it via a view-only link (works logged out, 404s on a bogus
+token) → added/removed tags and filtered the dashboard by one → archived it
+and confirmed it dropped out of the dashboard lists while surviving in the
+database (`status: ARCHIVED`, not deleted). The document picker, wizard,
+login, and register pages all render correctly in both locales.
+
+## Known limitation
+
+The wizard has no mid-questionnaire "save as draft" yet: `formData` only
+reaches the database once the final step submits, so there's currently no
+way to abandon a partially-filled questionnaire and resume it later from
+the dashboard. A `DRAFT` `GeneratedDocument` today only exists transiently,
+between that submit and a (normally immediate) generate call — the
+dashboard's "Retry generation" action is there for the case where that
+generate call fails, not for resuming an unfinished form.
 
 ## Next steps (not yet built)
 
-1. Dashboard (drafts, saved docs, folders/tags, share links, download
-   history).
-2. Nepal payment gateway integrations (eSewa, Khalti, Fonepay, ConnectIPS,
+1. Nepal payment gateway integrations (eSewa, Khalti, Fonepay, ConnectIPS,
    IME Pay) + plan/usage enforcement — the `Plan`/`Subscription`/`Payment`
    schema is ready, no integration code yet.
-3. Admin CRUD for categories/templates/clauses + moderation queue UI.
-4. E-sign module (typed/drawn signature capture + IP/timestamp audit trail
+2. Admin CRUD for categories/templates/clauses + moderation queue UI.
+3. E-sign module (typed/drawn signature capture + IP/timestamp audit trail
    — `Signature` model exists, no UI yet).
-5. Persisting generated PDFs/DOCX to S3-compatible storage (currently
+4. Persisting generated PDFs/DOCX to S3-compatible storage (currently
    rendered on demand per request rather than cached) and recording
    `pdfUrl`/`docxUrl` on `GeneratedDocument`.
+5. True mid-wizard save-as-draft (see "Known limitation" above).

@@ -36,6 +36,15 @@ export async function GET(
 
   registerExportFonts();
 
+  await prisma.auditLog.create({
+    data: {
+      userId: session.user.id,
+      action: "document.downloaded_pdf",
+      entityType: "GeneratedDocument",
+      entityId: document.id,
+    },
+  });
+
   const buffer = await renderToBuffer(
     DocumentPdf({
       title,
