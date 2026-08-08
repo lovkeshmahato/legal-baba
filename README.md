@@ -5,9 +5,9 @@ businesses generate legally-structured documents through a guided
 questionnaire, backed by lawyer-reviewed clause templates and Claude-drafted
 language.
 
-**Built so far (Phase 1–4):** project scaffold, database schema, the
-template engine, auth, the questionnaire wizard, and Claude-backed
-generation/review. Not yet built: PDF/DOCX export, dashboard, payments,
+**Built so far (Phase 1–5):** project scaffold, database schema, the
+template engine, auth, the questionnaire wizard, Claude-backed
+generation/review, and PDF/DOCX export. Not yet built: dashboard, payments,
 admin panel, e-sign — see "Next steps" below.
 
 ## Stack
@@ -21,6 +21,8 @@ admin panel, e-sign — see "Next steps" below.
 - **State:** Zustand (per-instance wizard store)
 - **i18n:** next-intl (`en` / `np`, locale-prefixed routes)
 - **Dates:** `nepali-date-converter` for BS ⇄ AD
+- **Export:** `@react-pdf/renderer` (PDF) + `docx` (DOCX), with a bundled
+  Noto Sans Devanagari font so Nepali text renders correctly in both
 
 ## Getting started
 
@@ -67,6 +69,8 @@ src/
         [id]/route.ts             # PATCH: save edited Tiptap content
         [id]/generate/route.ts     # POST: Claude draft (+ regenerate-as-new-version)
         [id]/explain/route.ts       # POST: "explain this clause" in plain language
+        [id]/pdf/route.ts            # GET: render + stream a PDF
+        [id]/docx/route.ts            # GET: render + stream a DOCX
   components/
     ui/                       # Button, Input, Select, Card, Badge, …
     wizard/                   # WizardForm, DynamicField, PartyBlockInput, DateBsInput,
@@ -82,10 +86,19 @@ src/
       build-prompt.ts          # assembles the per-generation user prompt
       generate-document.ts      # Claude tool-use call → Tiptap JSON + flags
     tiptap/build-doc.ts        # AI sections → Tiptap JSON (+ disclaimer paragraph)
+    document-export/
+      types.ts                 # DocBlock intermediate representation
+      tiptap-to-blocks.ts        # Tiptap JSON -> DocBlock[]
+      extract-parties.ts          # pulls PARTY_BLOCK answers out of formData
+      fonts.ts                     # registers the bundled Devanagari font for react-pdf
+      pdf-document.tsx              # react-pdf Document (letterhead, parties, signatures,
+                                     # witnesses, watermark, page numbers, footer disclaimer)
+      build-docx.ts                  # same structure via the `docx` package
   stores/wizard-store.ts      # Zustand vanilla store factory
   types/
     template-engine.ts        # zod schema for the JSON-schema field types
     next-auth.d.ts             # session/JWT augmentation (role, id)
+  assets/fonts/                # NotoSansDevanagari-{Regular,Bold}.woff (bundled, not fetched)
 
 messages/
   en.json, np.json           # UI translation strings
@@ -134,6 +147,21 @@ rows via the seed script or (later) the admin CRUD UI — no code changes.
    **Explain this clause** (selects text → `POST .../explain` → plain-language
    explanation), **Regenerate** (creates a new *version* row via
    `previousVersionId`, preserving history), and **Save changes** (`PATCH`).
+6. **Download PDF / DOCX** call `GET /api/documents/[id]/pdf` and `/docx`,
+   which re-fetch the (possibly hand-edited) `content`, flatten it from
+   Tiptap JSON into script-agnostic `DocBlock`s (`tiptapToBlocks`), pull the
+   answered party details back out of `formData` (`extractParties`), and
+   render a letterhead-style document: centered title, a parties info box,
+   the clause body, two-column signature blocks, a witness section, a
+   diagonal "DRAFT" watermark when `watermarked` is true, page numbers, and
+   the disclaimer as a footer on every page — matching Nepali drafting
+   conventions (stamp/signature and witness blocks). Nepali (Devanagari)
+   text is rendered with a bundled Noto Sans Devanagari font
+   (`src/assets/fonts/`) registered with react-pdf, since its default fonts
+   have no Devanagari glyphs; bilingual lines are split into per-script
+   `<Text>` runs (see `Bilingual` in `pdf-document.tsx`) rather than mixed
+   in one run, since a single font can't cover both scripts and react-pdf
+   errors instead of falling back.
 
 ## Data model highlights (`prisma/schema.prisma`)
 
@@ -179,19 +207,22 @@ pass. Manually smoke-tested against a local Postgres instance: register →
 sign in → create a draft (server-side validated against the template's
 field schema) → call the generate endpoint (reaches the real Anthropic API;
 fails cleanly with a 502 + JSON error on an invalid key, as expected in this
-sandbox) → PATCH saved edits → review page renders. The document
-picker, wizard, login, and register pages all render correctly in both
-locales.
+sandbox) → PATCH saved edits → review page renders → downloaded PDF and
+DOCX for a bilingual document (mixed English/Nepali paragraphs, bold/italic
+marks, a bullet list) with the Devanagari text rendering correctly in both
+formats. The document picker, wizard, login, and register pages all render
+correctly in both locales.
 
 ## Next steps (not yet built)
 
-1. PDF/DOCX export with Nepali document formatting conventions (letterhead,
-   witness/signature blocks, BS dates).
-2. Dashboard (drafts, saved docs, folders/tags, share links, download
+1. Dashboard (drafts, saved docs, folders/tags, share links, download
    history).
-3. Nepal payment gateway integrations (eSewa, Khalti, Fonepay, ConnectIPS,
+2. Nepal payment gateway integrations (eSewa, Khalti, Fonepay, ConnectIPS,
    IME Pay) + plan/usage enforcement — the `Plan`/`Subscription`/`Payment`
    schema is ready, no integration code yet.
-4. Admin CRUD for categories/templates/clauses + moderation queue UI.
-5. E-sign module (typed/drawn signature capture + IP/timestamp audit trail
+3. Admin CRUD for categories/templates/clauses + moderation queue UI.
+4. E-sign module (typed/drawn signature capture + IP/timestamp audit trail
    — `Signature` model exists, no UI yet).
+5. Persisting generated PDFs/DOCX to S3-compatible storage (currently
+   rendered on demand per request rather than cached) and recording
+   `pdfUrl`/`docxUrl` on `GeneratedDocument`.

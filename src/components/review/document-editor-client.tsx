@@ -116,11 +116,13 @@ export function DocumentEditorClient({
         <Button size="sm" variant="outline" onClick={onExplainSelection} disabled={explaining}>
           {explaining ? "…" : t("explain_clause")}
         </Button>
-        <Button size="sm" variant="ghost" disabled title="Coming in a later phase">
-          {t("download_pdf")}
+        <Button asChild size="sm" variant="ghost">
+          <a href={`/api/documents/${documentId}/pdf?locale=${locale}`} target="_blank" rel="noreferrer">
+            {t("download_pdf")}
+          </a>
         </Button>
-        <Button size="sm" variant="ghost" disabled title="Coming in a later phase">
-          {t("download_docx")}
+        <Button asChild size="sm" variant="ghost">
+          <a href={`/api/documents/${documentId}/docx?locale=${locale}`}>{t("download_docx")}</a>
         </Button>
         {savedAt && <span className="text-xs text-muted-foreground">Saved</span>}
       </div>
